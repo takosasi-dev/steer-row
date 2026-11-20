@@ -96,7 +96,7 @@ export function serve() {
 	const server = spawn(py, ['-m', 'http.server', String(HTTP_PORT), '--bind', '127.0.0.1', '--directory', root], { stdio: 'ignore' });
 	return {
 		url: `http://127.0.0.1:${HTTP_PORT}/steer-row/`,
-		stop: () => { server.kill(); rmSync(path.join(root, 'steer-row'), { force: true }); },
+		stop: () => { server.kill(); rmSync(path.join(root, 'steer-row'), { force: true }); rmSync(root, { recursive: true, force: true }); },
 	};
 }
 

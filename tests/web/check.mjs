@@ -6,7 +6,7 @@
 //     SR_URL=https://…/steer-row/ node tests/web/check.mjs   公開した物を確かめる
 //     SR_QUICK=1 …                                    3 分の通信の見張りを短くする(撮り直しの時)
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { DESKTOP, ROOT, expect, failureCount, open, serve, sleep } from './lib.mjs';
@@ -74,6 +74,7 @@ function replayHeadless(course, record) {
 	const py = process.env.SR_PYTHON || 'python';
 	const out = execFileSync(py, [path.join(ROOT, 'tools', 'gd.py'), 'run', 'res://tools/replay.gd', `course=${course}`, `file=${file}`],
 		{ encoding: 'utf8', env: { ...process.env, PYTHONIOENCODING: 'utf-8' } });
+	rmSync(dir, { recursive: true, force: true });
 	const m = out.match(/REPLAY (\d+) \/ (\S+) \/ (\d+)/);
 	return m ? { ticks: Number(m[1]), pos: m[2], walls: Number(m[3]) } : { out };
 }
@@ -212,16 +213,69 @@ try {
 	expect(c1.startsWith('SteerRow '), `コピーのボタン: ${JSON.stringify(c1).slice(0, 90)}`);
 	await page.shot('s3_copied');
 
-	// ここからはキーボードだけ(AC-18 の S1 → S6 → S2): タイトルへ → 設定 → コースを選ぶ → コース 2
+	// 3 回目: 押し込みも減速も無しで走る。1 回目(押し込みあり)の幽霊より速いので、緑の「幽霊 −…」と「新しい記録」が出る
+	await page.key('ArrowUp');
+	await page.key('Enter');  // もう1回
+	expect(!!(await page.waitState((s) => s.screen === 'play', 3000)), '↑ Enter でもう1回');
+	const want3 = { ahead: true, goal: true };
+	await drive({
+		onState: async (s) => {
+			const p = s.play;
+			if (want3.ahead && p.race_tick > 2400 && p.gap.startsWith('幽霊 −')) { want3.ahead = false; await page.shot('s2_ghost_behind_me'); }
+		},
+	});
+	const g3 = await page.waitState((s) => s.screen === 'play' && s.play.phase === 2, 2000);
+	await page.shot('s2_goal_new_best');
+	expect(!want3.ahead, '幽霊より前を走ると「幽霊 −…」が出る');
+	const res3 = await page.waitState((s) => s.screen === 'result', 5000);
+	await sleep(400);
+	await page.shot('s3_result_new_best');
+	expect(!!res3 && res3.last_run.ticks < run1.ticks, `3 回目は 1 回目より速い: ${res3?.last_run.ticks} < ${run1.ticks}(${g3 ? 'ゴールの字を撮った' : ''})`);
+
+	// ここからはキーボードだけ(AC-18 の S1 → S6 → S2): タイトルへ → コースを選ぶ → 各コース → 今日のコース → 設定 → コース 2
+	await page.key('ArrowDown');
 	await page.key('ArrowDown');
 	await page.key('Enter');
-	expect(!!(await page.waitState((s) => s.screen === 'title', 3000)), '↓ Enter でタイトルへ');
+	expect(!!(await page.waitState((s) => s.screen === 'title', 3000)), '↓↓ Enter でタイトルへ');
 	await sleep(300);
 	await page.shot('s1_title_after_intro');
 	await page.down('j'); await page.down('k');
 	await sleep(400);
 	await page.shot('s1_title_keys');
 	await page.up('j'); await page.up('k');
+	// コース 1〜14 を S6 から順に開き、走り始めて 1 枚撮る(道の飾りが全部のコースで描けるか)
+	for (let k = 1; k <= 14; k++) {
+		await page.key('ArrowDown');
+		await page.key('Enter');
+		await page.waitState((s) => s.screen === 'pick', 3000);
+		for (let d = 0; d < k; d++) await page.key('ArrowDown');
+		await page.key('Enter');
+		const pk = await page.waitState((s) => s.screen === 'play' && s.play.race_tick > 150, 8000);
+		expect(!!pk, `コース ${k} を開いて走り始める`);
+		await page.shot(`s2_course_${String(k).padStart(2, '0')}`);
+		await page.key('Escape');
+		await page.waitState((s) => s.paused, 2000);
+		for (let d = 0; d < 3; d++) await page.key('ArrowDown');
+		await page.key('Enter');
+		await page.waitState((s) => s.screen === 'title', 3000);
+	}
+	// 今日のコース(タイトルの一番上)を走り切る
+	await page.key('Enter');
+	const dl = await page.waitState((s) => s.screen === 'play', 3000);
+	expect(!!dl, 'Enter で今日のコース');
+	await sleep(300);
+	await page.shot('s2_daily_start');
+	await drive({ timeoutMs: 180000 });
+	const resd = await page.waitState((s) => s.screen === 'result', 8000);
+	await sleep(400);
+	await page.shot('s3_result_daily');
+	expect(!!resd && resd.share.includes('今日のコース') && resd.share.includes('1回目'), `今日のコースの共有の文字: ${JSON.stringify(resd?.share).slice(0, 80)}`);
+	await page.key('ArrowDown');
+	await page.key('ArrowDown');
+	await page.key('Enter');
+	await page.waitState((s) => s.screen === 'title', 3000);
+	await sleep(300);
+	await page.shot('s1_title_daily_record');
 	// 設定: 揺れ=切・点滅を弱める=入・画面の回転=切・操作=W A S D(NFR-12 の画像)
 	await page.key('ArrowUp');
 	await page.key('Enter');

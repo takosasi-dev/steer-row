@@ -547,3 +547,36 @@ func test_polish_strip_and_center() -> bool:
 	ok(_labels(m).has(S.SHARE_INTRO), "結果にコースの名前を出す")
 	_done(m)
 	return true
+
+
+func test_polish_new_best_and_ahead_of_ghost() -> bool:
+	var m := _main()
+	_to_play(m)
+	m.play._on_event({"type": "over", "reason": "goal"})
+	frames(m, 1, 0.0)
+	eq(m.play._sub.text, "", "初めての走り(自己ベストが無い)は「新しい記録」を出さない")
+	m.play._prev_best = m.play.sim.race_tick + 100
+	m.play._on_event({"type": "over", "reason": "goal"})
+	m.play._refresh(0.0)  # 本物は over を受けたフレームの終わりに描き直す
+	ok(m.play._sub.visible and m.play._sub.text == S.GOAL_NEW_BEST, "自己ベストを縮めたら「新しい記録」")
+	m.play._prev_best = m.play.sim.race_tick  # 同じタイムは縮めていない
+	m.play._on_event({"type": "over", "reason": "goal"})
+	eq(m.play._sub.text, "", "縮めなければ出さない")
+	_done(m)
+	# 幽霊より前: 遅い走りの記録を幽霊にして、中心 bot で走る
+	var slow := Sim.new(course(0))
+	while not slow.is_over() and slow.tick < 60000:
+		slow.set_input(0, slow.car.speed() > 200.0)  # 真っすぐ・200 を超えたらブレーキ(壁で遅くなる)
+		slow.step()
+		if slow.race_tick > 1200:
+			break
+	var m2 := _main()
+	m2.store.data["courses"]["0"] = {"best_ticks": 99999, "best_lap_ticks": 99999, "ghost": slow.record()}
+	_to_play(m2)
+	m2.play.bot = Bots.new(Bots.CENTER)
+	frames(m2, 400)
+	ok(m2.play.ghost_gap() < 0, "幽霊より前なら − : %s" % m2.play.ghost_gap())
+	ok(m2.play._bar["gap"].text.begins_with(S.GHOST_GAP % ["−", ""]), "文字は「幽霊 −…」: %s" % m2.play._bar["gap"].text)
+	eq(m2.play._bar["gap"].get_theme_color("font_color"), Kit.C_GOOD, "前なら緑")
+	_done(m2)
+	return true
