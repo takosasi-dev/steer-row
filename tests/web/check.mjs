@@ -227,7 +227,7 @@ try {
 	await page.key('Enter');
 	expect(!!(await page.waitState((s) => s.screen === 'settings', 3000)), '↑ Enter で設定');
 	for (let k = 0; k < 4; k++) { await page.key('ArrowDown'); await page.key('Enter'); }
-	const st = (await page.state()).settings;
+	const st = (await page.waitState((x) => x.settings.controls === 'wasd', 2000) ?? await page.state()).settings;  // 状態は次の描画で書き直される
 	expect(st.shake === false && st.reduce_flash === true && st.rotate === false && st.controls === 'wasd', `キーで設定を変える: ${JSON.stringify(st)}`);
 	await sleep(200);
 	await page.shot('s4_settings_changed');
