@@ -20,6 +20,11 @@ const C_DIM := Color("8B95A5")
 const C_SEL := Color("6BB8FF")
 const C_GOOD := Color("7EE787")
 const C_WARN := Color("FFB84D")
+# 磨きで足した色(v0.2.0)
+const C_DOT := Color(1, 1, 1, 0.07)  # 地面の点
+const C_DASH := Color(1, 1, 1, 0.13)  # 道の中央の破線
+const C_CURB := Color("B8483E")  # 縁石の赤
+const C_CURB_2 := Color("C9CDD4")  # 縁石の白
 
 static var _fonts := {}
 
@@ -94,7 +99,7 @@ static func place(c: Control, x: float, y: float, w: float, h: float) -> Control
 static func draw_strip(ci: CanvasItem, lit: Dictionary, wasd: bool, wheel: float = 0.0, target: float = 0.0, alpha: float = 1.0) -> void:
 	var f := font(700)
 	var labels: Array = [["A", S.WASD_LEFT], ["S", S.WASD_BRAKE], ["D", S.WASD_RIGHT]] if wasd else S.KEYS.map(func(k: String) -> Array: return [k, ""])
-	var w := 96.0 if wasd else 58.0
+	var w := 132.0 if wasd else 58.0  # W A S D の「S ブレーキ」が収まる幅
 	var x0 := 48.0
 	for i in labels.size():
 		var r := Rect2(x0 + i * (w + 8.0), 640, w, 60)
@@ -104,7 +109,7 @@ static func draw_strip(ci: CanvasItem, lit: Dictionary, wasd: bool, wheel: float
 		var text: String = labels[i][0] if labels[i][1] == "" else "%s %s" % labels[i]
 		ci.draw_string(f, Vector2(r.position.x, r.position.y + 40), text, HORIZONTAL_ALIGNMENT_CENTER, r.size.x, 20 if wasd else 24,
 			Color(C_BG if on else C_TEXT, alpha))
-	var left := 820.0
+	var left := 900.0
 	var right := 1220.0
 	var y := 676.0
 	ci.draw_string(f, Vector2(left, 656), S.HANDLE, HORIZONTAL_ALIGNMENT_LEFT, 200, 18, Color(C_DIM, alpha))
@@ -117,6 +122,37 @@ static func draw_strip(ci: CanvasItem, lit: Dictionary, wasd: bool, wheel: float
 	ci.draw_colored_polygon(PackedVector2Array([Vector2(mx, y + 10), Vector2(mx - 6, y + 20), Vector2(mx + 6, y + 20)]), Color(C_TEXT, 0.7 * alpha))
 	var nx := left + (right - left) * (wheel + 1.0) / 2.0
 	ci.draw_line(Vector2(nx, y - 18), Vector2(nx, y + 10), Color(C_NEEDLE, alpha), 4.0)
+
+
+# 速さの棒(帯と針の間)。k は 0〜1(V_MAX で 1)。ブレーキの間は棒を橙に、いっぱいの時は明るく。
+static func draw_speed(ci: CanvasItem, k: float, braking: bool) -> void:
+	var f := font(700)
+	var r := Rect2(740, 670, 130, 14)
+	ci.draw_string(f, Vector2(r.position.x, 656), S.SPEED, HORIZONTAL_ALIGNMENT_LEFT, 120, 18, C_DIM)
+	ci.draw_rect(r, Color(1, 1, 1, 0.05))
+	var fill := C_WARN if braking else (C_TEXT if k >= 0.999 else C_CAR)
+	ci.draw_rect(Rect2(r.position, Vector2(r.size.x * clampf(k, 0.0, 1.0), r.size.y)), fill)
+	for i in range(1, 5):
+		var tx := r.position.x + r.size.x * i / 5.0
+		ci.draw_line(Vector2(tx, r.position.y), Vector2(tx, r.end.y), C_BG, 2.0)
+	ci.draw_rect(r, Color(C_WALL, 0.8), false, 1.5)
+
+
+# 帯で光らせる四角(10 キーは番号 0〜9。W A S D は 0 = A、1 = S(ブレーキ)、2 = D)。
+static func lit_of(keys: int, brake: bool, wasd: bool) -> Dictionary:
+	var lit := {}
+	if wasd:
+		if keys & 1:
+			lit[0] = true
+		if brake:
+			lit[1] = true
+		if keys & (1 << 9):
+			lit[2] = true
+	else:
+		for i in 10:
+			if keys & (1 << i):
+				lit[i] = true
+	return lit
 
 
 # コースの点を rect に収める倍率と原点のずれ [倍率, ずれ](地図・コースを選ぶの小さな地図。北が上)。

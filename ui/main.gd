@@ -34,6 +34,17 @@ var _auto_step := 0
 var play_view_draws := 0  # smoke が印字する(描いた回数とタイヤの跡の本数)
 var play_skids := 0
 var _costs: Array = []  # smoke で測った 1 フレームの _process と描く時間(usec。NFR-1)
+var debug := false  # ?debug=1: window.srState に状態を出す(Web の自動の確かめが読むだけ)
+var last_run := {}  # 直前の走りの記録と最後の位置(R-4 の照らしで読む)
+var lat_ms: Array = []  # ハンドルのキーを押してから、それを sim に渡した後の絵を描き終わるまで(NFR-2 の目安)
+var frame_ms: Array = []
+var _last_frame := 0
+var _lat_seen := 0
+var rot_dps: Array = []  # 画面の回る速さ(度/秒。フレームごと)
+var flow: Array = []  # 道が流れた量 ÷(速さ × フレームの時間)。描く位置
+var flow_raw: Array = []  # 同じ物を sim の生の位置で
+var _prev_motion := []
+var _last_motion := 0
 
 
 func _ready() -> void:
@@ -43,13 +54,22 @@ func _ready() -> void:
 	var bg := ColorRect.new()
 	bg.color = Kit.C_BG
 	stage.add_child(Kit.place(bg, -2000, -2000, 5280, 4720))
+	get_viewport().size_changed.connect(_layout)
+	_layout()
 	store = Store.new()
 	_apply_settings()
 	auto = OS.is_debug_build() and OS.get_cmdline_user_args().has("--auto")  # 公開版では効かせない(bot の記録を保存しない)
 	if auto:
 		Engine.time_scale = 4.0  # 1 フレーム 8 tick(上限)で進める
+	debug = OS.has_feature("web") and str(JavaScriptBridge.eval("location.search", true)).contains("debug=1")
+	RenderingServer.frame_post_draw.connect(_after_draw)
 	_watch_visibility()
 	_show_gate()
+
+
+# 縦横比が 16:9 でない窓では表示の範囲が広がる(project.godot の aspect=expand)。舞台をその真ん中に置き、余りは背景色にする(共通 §3 の 1)。
+func _layout() -> void:
+	stage.position = ((get_viewport().get_visible_rect().size - stage.size) / 2.0).floor()
 
 
 func _apply_settings() -> void:
@@ -220,7 +240,7 @@ func _notification(what: int) -> void:
 func _focus_lost() -> void:
 	if play != null:
 		play.release_all()
-	if screen == "settings" and current != null:
+	if screen in ["settings", "title"] and current != null:
 		current.release_all()
 	_pause()
 
@@ -242,6 +262,10 @@ func _on_finished(result: Dictionary, record: String) -> void:
 	var k := int(r["course"])
 	play_view_draws = play.view.draws
 	play_skids = play.view.skids.size()
+	var gc: RefCounted = play.sim.ghost_car
+	last_run = {"course": k, "record": record, "ticks": int(result["total_ticks"]), "walls": int(result["walls"]),
+		"pos": "%.6f,%.6f" % [play.sim.car.x, play.sim.car.y],
+		"ghost_pos": "%.6f,%.6f" % [gc.x, gc.y] if gc != null else "", "ghost_done": play.sim.ghost_done}
 	for i in mini(play.cost_us.size(), play.view.draw_us.size()):
 		_costs.append(int(play.cost_us[i]) + int(play.view.draw_us[i]))
 	var rec: Dictionary
@@ -254,7 +278,10 @@ func _on_finished(result: Dictionary, record: String) -> void:
 	_clear()
 	screen = "result"
 	var v := Result.new()
-	v.build(result, rec, text)
+	var label: String = S.SHARE_INTRO if k == B.INTRO else "%s  %s" % [S.COURSE_N % k, S.COURSE_NAMES[k]]
+	if r["entry"] == Share.DAILY:
+		label = S.B_DAILY + "   " + label
+	v.build(result, rec, text, label)
 	v.retry.connect(func() -> void: _start(run))  # FR-17: 同じコース
 	v.to_title.connect(_show_title)
 	stage.add_child(v)
@@ -277,7 +304,7 @@ func _show_settings(from: String) -> void:
 		pause_view.visible = false
 		var dim := ColorRect.new()
 		dim.color = Color(Kit.C_BG, 0.96)
-		s.add_child(Kit.place(dim, 0, 0, 1280, 720))
+		s.add_child(Kit.place(dim, -2000, -2000, 5280, 4720))  # 16:9 でない窓の余りまで覆う
 		s.move_child(dim, 0)
 		stage.add_child(s)
 		current = s
@@ -377,6 +404,79 @@ func _process(_delta: float) -> void:
 					auto = false
 				else:
 					_input(_key(KEY_ENTER))  # もう1回
+
+
+# --- デバッグ用の窓口(?debug=1 の Web だけ。読むだけ。作りは KeySwat) ---
+
+func _after_draw() -> void:
+	var now := Time.get_ticks_usec()
+	if _last_frame > 0 and frame_ms.size() < 20000 and screen == "play":
+		frame_ms.append((now - _last_frame) / 1000.0)
+	_last_frame = now
+	_watch_motion((now - _last_motion) / 1000000.0)
+	_last_motion = now
+	if play != null and play.stepped_key_at > _lat_seen:
+		_lat_seen = play.stepped_key_at
+		if lat_ms.size() < 2000:
+			lat_ms.append((now - play.stepped_key_at) / 1000.0)
+	if debug:
+		JavaScriptBridge.eval("window.srState=" + JSON.stringify(JSON.stringify(state())), true)
+		if frame_ms.size() % 60 == 0:
+			JavaScriptBridge.eval("window.srStats=" + JSON.stringify(JSON.stringify(stats())), true)
+
+
+# 動きの滑らかさ(磨きの測定): 画面の回る速さ(度/秒)と、1 フレームに道が流れた量 ÷(速さ × フレームの時間)。
+# 流れは 1 に近いほど滑らか。描く位置(補間あり)と sim の生の位置(補間なし)の両方を取って比べる。
+func _watch_motion(dt: float) -> void:
+	if play == null or screen != "play" or play.paused or play.sim == null or play.sim.phase != 1 or play._snap.is_empty() or dt <= 0.0:
+		_prev_motion = []
+		return
+	var c: Dictionary = play._snap["car"]
+	var now := [float(c["x"]), float(c["y"]), play.sim.car.x, play.sim.car.y, play.view.cam_r]
+	var sp := float(c["speed"])
+	if _prev_motion.size() == 5 and rot_dps.size() < 20000:
+		rot_dps.append(absf(wrapf(now[4] - _prev_motion[4], -PI, PI)) / dt * 180.0 / PI)
+		if sp > 100.0:
+			flow.append(Vector2(now[0] - _prev_motion[0], now[1] - _prev_motion[1]).length() / (sp * dt))
+			flow_raw.append(Vector2(now[2] - _prev_motion[2], now[3] - _prev_motion[3]).length() / (sp * dt))
+	_prev_motion = now
+
+
+func state() -> Dictionary:
+	var out := {"screen": screen, "paused": pause_view != null and pause_view.visible, "buttons": {}, "sfx": Sfx.played, "unlocked": Sfx.unlocked,
+		"last_run": last_run, "settings": store.settings()}
+	var root: Control = pause_view if pause_view != null and pause_view.visible else current
+	if root != null:
+		for b in root.find_children("*", "Button", true, false):
+			var btn := b as Button
+			if btn.is_visible_in_tree() and not btn.disabled:
+				var c := btn.global_position - stage.global_position + btn.size / 2  # 舞台の座標(1280×720)
+				out["buttons"][String(btn.name)] = [c.x, c.y]
+	if play != null and play.sim != null:
+		var sn: Dictionary = play.sim.snapshot()
+		sn["hint"] = Bots.center_input(play.sim)  # 中心 bot ならこう押す(自動の確かめが本物のキーで押す)
+		sn["ghost_done"] = play.sim.ghost_done
+		sn["held"] = play.held.size()
+		sn["gap"] = play._bar["gap"].text
+		sn["shake"] = [play.position.x, play.position.y]
+		sn["cam_r"] = play.view.cam_r
+		out["play"] = sn
+	if screen == "result" and current != null:
+		out["share"] = current.share
+	return out
+
+
+func stats() -> Dictionary:
+	return {"lat": _pct(lat_ms), "frame": _pct(frame_ms), "rot_dps": _pct(rot_dps), "flow": _pct(flow), "flow_raw": _pct(flow_raw)}
+
+
+@warning_ignore("integer_division")
+static func _pct(list: Array) -> Dictionary:
+	if list.is_empty():
+		return {"n": 0}
+	var s := list.duplicate()
+	s.sort()
+	return {"n": s.size(), "p5": s[s.size() / 20], "p50": s[s.size() / 2], "p95": s[mini(int(ceil(s.size() * 0.95)) - 1, s.size() - 1)], "max": s[-1]}
 
 
 static func _key(pk: int) -> InputEventKey:

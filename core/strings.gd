@@ -3,7 +3,7 @@
 extends RefCounted
 
 const NAME := "SteerRow"
-const VERSION := "v0.1.0"
+const VERSION := "v0.2.0"
 const URL := "https://takosasi-dev.github.io/steer-row/"
 
 # 10 キーの印字(§9.2。左から 0〜9)
@@ -42,6 +42,9 @@ const FASTEST := "最速"
 const GOAL := "ゴール"
 const TIMEOUT := "時間切れ"
 const HANDLE := "ハンドル"
+const SPEED := "速さ"  # 磨きで足した(v0.2.0)
+const GHOST_GAP := "幽霊 %s%s"  # 幽霊との差(+ は幽霊より遅い)。磨きで足した(v0.2.0)
+const GOAL_NEW_BEST := "新しい記録"  # ゴールの字の下。磨きで足した(v0.2.0)
 const WASD_LEFT := "左"
 const WASD_RIGHT := "右"
 const WASD_BRAKE := "ブレーキ"

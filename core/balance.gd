@@ -75,6 +75,21 @@ const ENGINE_PITCH_MIN := 0.8
 const ENGINE_PITCH_MAX := 1.6
 const WALL_SOUND_FULL := 400.0  # この外向きの速さで当たる音が一番大きい
 
+# 磨きで足した演出(v0.2.0。仕様に無い見た目の値。車の動きには関わらない)
+const GHOST_ALPHA := 0.4  # 幽霊の線の不透明度(画面設計書 §9)
+const GRID_STEP := 160.0  # 地面の点の間隔(世界の px)
+const GRID_MARGIN := 1200.0  # コースの外側に点を打つ幅
+const CURB_TURN := 0.05  # 5 点ぶんの向きの変わり(外積)がこれ以上の所に縁石を置く
+const CURB_DEPTH := 14.0  # 縁石の幅(世界の px)
+const DASH_POINTS := 4  # 中央の破線の 1 本の長さ(点の数。間も同じ)
+const START_CELL := 20.0  # スタートの市松の 1 マス(世界の px)
+const SPARK_MS := 260  # 火花が消えるまで
+const SPARK_MIN := 4
+const SPARK_MAX := 14
+const SPARK_SPEED := 420.0  # 火花の速さ(世界の px/秒)
+const HUD_TOP := 628.0  # 画面の下の幕の上の端
+const CENTER_BAND_ALPHA := 0.6  # 中央の字(数え・周・ゴール)の後ろの幕
+
 # 設定(共通 §3 の 17)
 const VOLUMES := [0, 25, 50, 75, 100]
 const DEFAULT_VOLUME := 75

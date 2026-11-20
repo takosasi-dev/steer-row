@@ -25,6 +25,8 @@ var bot: RefCounted = null  # 自動の確かめ(smoke)の時だけ。step ご�
 var view: View
 var minimap: Minimap
 var cost_us: Array = []  # 1 フレームの _process と描く時間(usec。NFR-1 の測定が読む)
+var key_at := 0  # 最後にハンドルかブレーキのキーが押された時(usec。NFR-2 の測定が読む)
+var stepped_key_at := 0  # その押下を sim に渡した時の key_at(この後に描き終わるまでを main が測る)
 
 var _acc := 0.0
 var _over_at := -1
@@ -39,6 +41,11 @@ var _center: Label
 var _ime: Label
 var _ime_until := 0
 var _prev_best := -1  # このコースの自己ベスト(tick。無ければ −1)
+var _sub: Label  # 中央の字の下の 1 行(新しい記録)
+var _prev_car := []  # 最後の step の前の車の [x, y, hx, hy](描く時に tick の間を補間する)
+var _prev_ghost := []
+var _my_at := PackedInt32Array()  # 進み(周 × 点の数 + 区間)に初めて届いた走りの tick(幽霊との差)
+var _gh_at := PackedInt32Array()
 
 
 func _ready() -> void:
@@ -59,8 +66,17 @@ func _ready() -> void:
 	_bar["best"] = Kit.label("", 22, Kit.C_DIM, 500)
 	_bar["best"].horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
 	add_child(Kit.place(_bar["best"], 820, 12, 250, 40))
+	_bar["gap"] = Kit.label("", 22, Kit.C_DIM, 700)
+	add_child(Kit.place(_bar["gap"], 440, 56, 400, 30))
 	_center = Kit.label("", 64, Kit.C_TEXT, 800)
+	var band := Kit.box(Color(0, 0, 0, B.CENTER_BAND_ALPHA), Color(Kit.C_WALL, 0.35), 1)
+	band.content_margin_left = 36
+	band.content_margin_right = 36
+	band.set_corner_radius_all(10)
+	_center.add_theme_stylebox_override("normal", band)  # 道や壁の線の上でも字が読めるように
 	add_child(Kit.place(_center, 0, 220, 1280, 100))
+	_sub = Kit.label("", 26, Kit.C_GOOD, 700)
+	add_child(Kit.place(_sub, 0, 326, 1280, 40))
 	_ime = Kit.label(S.IME, 22, Kit.C_WARN, 700)
 	_ime.visible = false
 	add_child(Kit.place(_ime, 0, 330, 1280, 40))
@@ -82,6 +98,11 @@ func start(course: Dictionary, ghost: String, st: Dictionary, prev_best: int = -
 	_over_at = -1
 	_go_at = -100000
 	_lap_until = 0
+	_sub.text = ""
+	_prev_car = _pose(sim.car)
+	_prev_ghost = _pose(sim.ghost_car)
+	_my_at = PackedInt32Array([0])
+	_gh_at = PackedInt32Array([0])
 	_refresh(0.0)
 	view.snap_camera(_snap)
 
@@ -101,6 +122,7 @@ func track_key(ev: InputEventKey) -> void:
 		held.erase(pk)
 	elif not ev.echo and not Keymap.has_modifier(ev):
 		held[pk] = true  # FR-24: 押しっぱなしの繰り返しと Ctrl・Alt・Meta と一緒の押すは数えない
+		key_at = Time.get_ticks_usec()
 
 
 # S2 のキー。Esc は一時停止。ほかは track_key が押されている組を持つだけ(Enter・↑↓ は何もしない。画面設計書 §8)。
@@ -141,13 +163,19 @@ func _process(delta: float) -> void:
 	if n > B.MAX_STEPS_PER_FRAME:
 		n = B.MAX_STEPS_PER_FRAME  # E-20: 超えた分は捨てる
 		_acc = 0.0
+	if n > 0 and key_at > stepped_key_at:
+		stepped_key_at = key_at  # 帯は sim の押している組から描くので、この後に描いた絵で光る
 	for k in n:
 		if bot != null:
 			bot.act(sim)
 		else:
 			var inp := Keymap.input_of(held, controls, arrows)
 			sim.set_input(inp[0], inp[1])
+		_prev_car = _pose(sim.car)
+		_prev_ghost = _pose(sim.ghost_car)
 		sim.step()
+		_mark(_my_at, sim.car)
+		_mark(_gh_at, sim.ghost_car)
 		for e: Dictionary in sim.events():
 			_on_event(e)
 		if sim.is_over():
@@ -155,6 +183,40 @@ func _process(delta: float) -> void:
 	_refresh(delta)
 	_sound()
 	cost_us.append(Time.get_ticks_usec() - t0)
+
+
+# 車の [x, y, hx, hy](無ければ [])。
+static func _pose(c: RefCounted) -> Array:
+	return [] if c == null else [c.x, c.y, c.hx, c.hy]
+
+
+# 描く車の位置と向きを、前の tick の pose から今へ a(0〜1)だけ進めた所にする。向きは長さ 1 に直す。
+static func lerp_pose(c: Dictionary, prev: Array, a: float) -> void:
+	if prev.size() != 4:
+		return
+	c["x"] = lerpf(prev[0], float(c["x"]), a)
+	c["y"] = lerpf(prev[1], float(c["y"]), a)
+	var h := Vector2(lerpf(prev[2], float(c["hx"]), a), lerpf(prev[3], float(c["hy"]), a)).normalized()
+	c["hx"] = h.x
+	c["hy"] = h.y
+
+
+# 進み(周 × 点の数 + 区間)に初めて届いた走りの tick を足す。後ろへ戻った時と、輪の継ぎ目で飛んだ時は足さない。
+func _mark(at: PackedInt32Array, c: RefCounted) -> void:
+	if c == null:
+		return
+	var p: int = c.laps * sim.track.n + c.seg
+	if p >= at.size() and p - at.size() < B.SEARCH:
+		while at.size() <= p:
+			at.append(sim.race_tick)
+
+
+# 幽霊との差(tick。+ は幽霊より遅い)。2 台とも届いた一番先の進みで、届いた tick を比べる。幽霊が無い・数えの間は null。
+func ghost_gap() -> Variant:
+	if sim == null or not sim.has_ghost() or sim.race_tick == 0:
+		return null
+	var q := mini(_my_at.size(), _gh_at.size()) - 1
+	return _my_at[q] - _gh_at[q]
 
 
 # 鳴り続ける音(§9.10 の毎フレームの行)。エンジンの高さを速さで 0.8〜1.6 に、滑っている間は滑る音。
@@ -179,6 +241,7 @@ func _on_event(e: Dictionary) -> void:
 		"wall_hit":
 			var s: float = e["s"]
 			view.flash[int(e["side"])] = now
+			view.spark(int(e["side"]), s)
 			Sfx.play("wall", s / B.WALL_SOUND_FULL)
 			if s >= B.SHAKE_SPEED:
 				_shake_until = now + B.SHAKE_MS
@@ -193,7 +256,9 @@ func _on_event(e: Dictionary) -> void:
 			if e["reason"] == "timeout":
 				Sfx.play("timeout")
 			else:
-				Sfx.play("best" if _prev_best < 0 or sim.race_tick < _prev_best else "goal")
+				var best := _prev_best < 0 or sim.race_tick < _prev_best
+				Sfx.play("best" if best else "goal")
+				_sub.text = S.GOAL_NEW_BEST if best and _prev_best >= 0 else ""  # 初めての走りは比べる物が無いので出さない
 
 
 @warning_ignore("integer_division")
@@ -214,22 +279,20 @@ func _refresh(delta: float) -> void:
 		text = S.GO
 	elif now < _lap_until:
 		text = _lap_note
-	_center.text = text
-	_center.add_theme_font_size_override("font_size", 40 if text == _lap_note else 64)
-	var lit := {}
-	var keys: int = _snap["keys"]
-	if controls == "wasd":
-		if keys & 1:
-			lit[0] = true
-		if _snap["brake"]:
-			lit[1] = true
-		if keys & (1 << 9):
-			lit[2] = true
-	else:
-		for i in 10:
-			if keys & (1 << i):
-				lit[i] = true
-	view.lit = lit
+	if _center.text != text:
+		_center.text = text
+		_center.add_theme_font_size_override("font_size", 44 if text == _lap_note else 64)
+		_center.visible = text != ""
+		_center.reset_size()  # 幕を字の幅に合わせて真ん中に置く
+		_center.position.x = (B.SCREEN_W - _center.size.x) / 2.0
+	_sub.visible = _over_at >= 0
+	var gap: Variant = ghost_gap()
+	_bar["gap"].text = "" if gap == null else S.GHOST_GAP % ["+" if gap > 0 else ("−" if gap < 0 else ""), Share.diff_text(Share.hundredths(absi(gap)))]
+	_bar["gap"].add_theme_color_override("font_color", Kit.C_GOOD if gap != null and gap < 0 else Kit.C_WARN)
+	view.lit = Kit.lit_of(_snap["keys"], _snap["brake"], controls == "wasd")
+	lerp_pose(_snap["car"], _prev_car, _acc)  # 描く位置だけを tick の間で補間する(sim と記録は生の値のまま)
+	if _snap["ghost"] != null:
+		lerp_pose(_snap["ghost"], _prev_ghost, _acc)
 	view.advance(_snap, delta)
 	minimap.snap = _snap
 	minimap.queue_redraw()

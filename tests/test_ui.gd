@@ -5,6 +5,7 @@ extends "res://tests/suite.gd"
 const MainScene := preload("res://ui/main.tscn")
 const Store := preload("res://save/save_store.gd")
 const Keymap := preload("res://ui/keymap.gd")
+const Kit := preload("res://ui/kit.gd")
 
 
 static func kev(pk: int, pressed: bool = true, echo: bool = false) -> InputEventKey:
@@ -451,5 +452,98 @@ func test_engine_and_drift_sound() -> bool:
 	press(m, KEY_ESCAPE)
 	frames(m, 1)
 	ok(not engine.playing and not Sfx._loops["drift"].playing, "一時停止で止める")
+	_done(m)
+	return true
+
+
+# --- 磨きで足した演出(v0.2.0) ---
+
+func test_polish_ghost_gap() -> bool:
+	var a := run_bot(0)
+	var m := _main()
+	m.store.data["courses"]["0"] = {"best_ticks": a.race_tick, "best_lap_ticks": a.best_lap(), "ghost": a.record()}
+	_to_play(m)
+	ok(m.play.sim.has_ghost(), "幽霊がある")
+	eq(m.play.ghost_gap(), null, "数えの間は差を出さない")
+	m.play.bot = Bots.new(Bots.CENTER)  # 幽霊と同じ押し方
+	frames(m, 200)
+	eq(m.play.ghost_gap(), 0, "同じ走りなら差 0")
+	eq(m.play._bar["gap"].text, S.GHOST_GAP % ["", "0.00"], "幽霊 0.00")
+	m.play.bot = null
+	press(m, KEY_SPACE)
+	frames(m, 60)
+	ok(m.play.ghost_gap() > 0, "ブレーキで遅れると + になる: %s" % m.play.ghost_gap())
+	ok(m.play._bar["gap"].text.begins_with(S.GHOST_GAP % ["+", ""]), "文字は「幽霊 +…」: %s" % m.play._bar["gap"].text)
+	_done(m)
+	return true
+
+
+func test_polish_lerp_pose() -> bool:
+	var Play := preload("res://ui/play.gd")
+	var c := {"x": 10.0, "y": 4.0, "hx": 0.0, "hy": -1.0}
+	Play.lerp_pose(c, [0.0, 0.0, 1.0, 0.0], 0.5)
+	near(c["x"], 5.0, "x は前の tick と今の真ん中")
+	near(c["y"], 2.0, "y も")
+	near(Vector2(c["hx"], c["hy"]).length(), 1.0, "向きは長さ 1 に直す(Vector2 は 32 ビット)", 1e-6)
+	var d := {"x": 10.0, "y": 4.0, "hx": 0.6, "hy": 0.8}
+	Play.lerp_pose(d, [0.0, 0.0, 1.0, 0.0], 1.0)
+	eq([d["x"], d["y"]], [10.0, 4.0], "a = 1 なら今の位置")
+	var m := _main()
+	_to_play(m)
+	_go(m)
+	frames(m, 30)
+	frames(m, 1, 1.0 / 144.0)  # 144 Hz の画面: tick の途中で描く
+	var drawn := Vector2(m.play._snap["car"]["x"], m.play._snap["car"]["y"])
+	var now := Vector2(m.play.sim.car.x, m.play.sim.car.y)
+	var prev := Vector2(m.play._prev_car[0], m.play._prev_car[1])
+	near(drawn.distance_to(prev) + drawn.distance_to(now), prev.distance_to(now), "描く位置は前の tick と今の間", 1e-6)
+	ok(m.play._acc > 0.0 and m.play._acc < 1.0 and drawn != now, "tick の途中なら今の位置より手前に描く")
+	_done(m)
+	return true
+
+
+func test_polish_flash_and_sparks_follow_settings() -> bool:
+	var m := _main()
+	m.store.set_setting("reduce_flash", true)
+	_to_play(m)
+	_go(m)
+	frames(m, 2)
+	ok(m.play.view.flash_alpha() <= B.REDUCED_FLASH_ALPHA, "点滅を弱めると壁の光と火花は 20% 以下")
+	m.play._on_event({"type": "wall_hit", "s": 400.0, "side": 1})
+	eq(m.play.view.sparks.size(), B.SPARK_MAX, "強く当たると火花はいちばん多く")
+	m.play._on_event({"type": "wall_hit", "s": 1.0, "side": -1})
+	eq(m.play.view.sparks.size(), B.SPARK_MIN, "弱く当たっても少しは出す")
+	m.play.view._spark_born -= B.SPARK_MS + 1
+	frames(m, 1)
+	eq(m.play.view.sparks.size(), 0, "時間が過ぎたら消える")
+	m.play.view.reduce_flash = false
+	eq(m.play.view.flash_alpha(), 1.0, "弱めないなら 100%")
+	_done(m)
+	return true
+
+
+func test_polish_strip_and_center() -> bool:
+	var f := Kit.font(700)
+	ok(f.get_string_size(S.KEYS[1] + " " + S.WASD_BRAKE, HORIZONTAL_ALIGNMENT_LEFT, -1, 20).x < 132.0, "W A S D の帯に「S ブレーキ」が収まる")
+	var lit := Kit.lit_of(1 | (1 << 9), true, true)
+	eq(lit, {0: true, 1: true, 2: true}, "W A S D の帯: A・S(ブレーキ)・D")
+	eq(Kit.lit_of((1 << 3) | (1 << 4), false, false), {3: true, 4: true}, "10 キーの帯: F と G")
+	var m := _main()
+	press(m, KEY_X)
+	press(m, KEY_J)
+	ok(m.current._held.has(KEY_J), "タイトルの帯も押したキーで光る")
+	m.current._process(0.5)
+	ok(m.current._car.w > 0.0, "タイトルの針も回る")
+	m._focus_lost()
+	ok(m.current._held.is_empty(), "フォーカスが外れたら離したことにする")
+	release(m, KEY_J)
+	press(m, KEY_ENTER)
+	ok(m.play._center.visible and m.play._center.text == "3", "数えの字を幕つきで出す")
+	_go(m)
+	m.play._go_at = -100000
+	frames(m, 1)
+	ok(not m.play._center.visible, "字が無い時は幕も出さない")
+	_finish(m)
+	ok(_labels(m).has(S.SHARE_INTRO), "結果にコースの名前を出す")
 	_done(m)
 	return true

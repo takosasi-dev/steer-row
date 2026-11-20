@@ -36,6 +36,12 @@ func act(sim: RefCounted) -> void:
 
 
 func _center(sim: RefCounted) -> void:
+	var inp := center_input(sim)
+	sim.set_input(inp[0], inp[1])
+
+
+# 中心 bot が次に押す [10 キーの組, ブレーキ]。Web の自動の確かめ(?debug=1)も、これを読んで本物のキーを押す。
+static func center_input(sim: RefCounted) -> Array:
 	var t: Track = sim.track
 	var c: Car = sim.car
 	var j := (c.seg + B.BOT_AHEAD) % t.n
@@ -49,7 +55,7 @@ func _center(sim: RefCounted) -> void:
 		aim = 1.0 if cross >= 0.0 else -1.0
 	var key := clampi(int(floor((aim * 9.0 + 9.0) / 2.0 + 0.5)), 0, Wheel.KEYS - 1)
 	var brake := c.speed() > B.BOT_BRAKE_SPEED and _bend(t, c.seg) < B.BOT_BRAKE_DOT
-	sim.set_input(1 << key, brake)
+	return [1 << key, brake]
 
 
 # 点 i の向きと、8・16・…・40 点先の向きの内積の一番小さい値。

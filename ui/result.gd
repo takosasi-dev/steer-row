@@ -19,18 +19,19 @@ var _copied: Label
 
 
 # rec は save_store.record() の戻り値。share_text は時間切れなら ""。
-func build(result: Dictionary, rec: Dictionary, share_text: String) -> void:
+func build(result: Dictionary, rec: Dictionary, share_text: String, course_label: String = "") -> void:
 	size = Vector2(1280, 720)
 	share = share_text
 	_shown_at = Time.get_ticks_msec()
 	var done: bool = result["finished"]
 	var total := int(result["total_ticks"])
-	add_child(Kit.place(Kit.label(S.RES_GOAL % Share.time_text(total) if done else S.TIMEOUT, 56, Kit.C_TEXT, 800), 0, 20, 1280, 84))
+	add_child(Kit.place(Kit.label(course_label, 20, Kit.C_DIM, 500), 0, 12, 1280, 28))  # どのコースの結果か
+	add_child(Kit.place(Kit.label(S.RES_GOAL % Share.time_text(total) if done else S.TIMEOUT, 56, Kit.C_TEXT, 800), 0, 30, 1280, 80))
 	if done and rec["prev_best"] != null:
 		var prev := int(rec["prev_best"])
 		var diff := Share.hundredths(total) - Share.hundredths(prev)
 		var text: String = S.RES_NEW_BEST % Share.diff_text(diff) if diff < 0 else S.RES_TO_BEST % [Share.diff_text(diff), Share.time_text(prev)]
-		add_child(Kit.place(Kit.label(text, 24, Kit.C_GOOD if diff < 0 else Kit.C_DIM, 700), 0, 104, 1280, 36))
+		add_child(Kit.place(Kit.label(text, 24, Kit.C_GOOD if diff < 0 else Kit.C_DIM, 700), 0, 110, 1280, 36))
 	var row := HBoxContainer.new()
 	row.alignment = BoxContainer.ALIGNMENT_CENTER
 	row.add_theme_constant_override("separation", 48)
@@ -39,9 +40,9 @@ func build(result: Dictionary, rec: Dictionary, share_text: String) -> void:
 		var best: bool = int(laps[i]) == int(result["best_lap"])
 		var s: String = S.RES_LAP % [i + 1, Share.time_text(int(laps[i]))] + (S.RES_FASTEST if best and laps.size() > 1 else "")
 		row.add_child(Kit.label(s, 24, Kit.C_TEXT if best else Kit.C_DIM, 500))
-	add_child(Kit.place(row, 0, 148, 1280, 40))
+	add_child(Kit.place(row, 0, 152, 1280, 40))
 	var walls := int(result["walls"])
-	add_child(Kit.place(Kit.label(S.RES_WALLS % walls, 24, Kit.C_GOOD if walls == 0 else Kit.C_TEXT, 700), 0, 192, 1280, 36))
+	add_child(Kit.place(Kit.label(S.RES_WALLS % walls, 24, Kit.C_GOOD if walls == 0 else Kit.C_TEXT, 700), 0, 194, 1280, 36))
 	if rec.get("ghost_new", false):
 		add_child(Kit.place(Kit.label(S.GHOST_NEW, 20, Kit.C_GOOD), 0, 228, 1280, 30))
 	_retry = Kit.place(Kit.button("retry", S.B_RETRY, 30), 490, 268, 300, 68)
@@ -58,16 +59,17 @@ func build(result: Dictionary, rec: Dictionary, share_text: String) -> void:
 		box.add_theme_font_override("font", Kit.font(400))
 		box.add_theme_font_size_override("font_size", 18)
 		box.add_theme_color_override("font_readonly_color", Kit.C_TEXT)
-		add_child(Kit.place(box, 290, 360, 700, 100))
-		var copy := Kit.place(Kit.button("copy", S.B_COPY, 24), 420, 476, 200, 56)
+		box.scroll_fit_content_height = true  # 3 行が収まる高さにする(枠に送りの棒を出さない)
+		add_child(Kit.place(box, 290, 356, 700, 116))
+		var copy := Kit.place(Kit.button("copy", S.B_COPY, 24), 420, 488, 200, 56)
 		add_child(copy)
 		copy.pressed.connect(_copy)
 		list.append(copy)
-	var title := Kit.place(Kit.button("title", S.B_TITLE, 24), 660 if share != "" else 540, 476, 200, 56)
+	var title := Kit.place(Kit.button("title", S.B_TITLE, 24), 660 if share != "" else 540, 488, 200, 56)
 	add_child(title)
 	list.append(title)
 	_copied = Kit.label("", 18, Kit.C_DIM)
-	add_child(Kit.place(_copied, 0, 540, 1280, 28))
+	add_child(Kit.place(_copied, 0, 552, 1280, 28))
 	if not rec.get("saved", true):
 		add_child(Kit.place(Kit.label(S.SAVE_FAILED, 20, Kit.C_WARN), 0, 600, 1280, 40))
 	_retry.pressed.connect(func() -> void: retry.emit())

@@ -8,9 +8,16 @@ const S := preload("res://core/strings.gd")
 const Share := preload("res://core/share_text.gd")
 const Kit := preload("res://ui/kit.gd")
 const Menu := preload("res://ui/menu.gd")
+const B := preload("res://core/balance.gd")
+const Wheel := preload("res://core/wheel.gd")
+const Car := preload("res://core/car.gd")
+const Keymap := preload("res://ui/keymap.gd")
 
 var menu: Menu
 var _wasd := false
+var _held := {}  # 押されているハンドルのキー(帯を光らせるだけ。走りには使わない)
+var _car := Car.new()  # 針を回すためだけの車(動かさない)
+var _acc := 0.0
 
 
 # store は save_store、day は通し日数、course は今日のコースの番号。
@@ -50,9 +57,39 @@ func build(store: RefCounted, day: int, course: int) -> void:
 	menu = Menu.new(order, 0)
 
 
+# 帯は押したキーで光り、針も回る(走る前に 10 キーがハンドルだと手で分かるように。磨きで足した)。
+# 針は core の車と同じ速さで目標へ回す(ハンドルの決まりを 2 か所に書かない)。
 func _draw() -> void:
-	Kit.draw_strip(self, {}, _wasd, 0.0, 0.0, 0.35)
+	var inp := Keymap.input_of(_held, "wasd" if _wasd else "row")
+	var lit := Kit.lit_of(inp[0], inp[1], _wasd)
+	Kit.draw_strip(self, lit, _wasd, _car.w, Wheel.target(inp[0]), 1.0 if not _held.is_empty() else 0.45)
+
+
+func _process(delta: float) -> void:
+	var target := Wheel.target(Keymap.input_of(_held, "wasd" if _wasd else "row")[0])
+	_acc += delta * B.TICK_HZ
+	var n := mini(int(_acc), B.MAX_STEPS_PER_FRAME)
+	_acc -= int(_acc)
+	var before := _car.w
+	for k in n:
+		_car.turn_wheel(target)
+	if _car.w != before:
+		queue_redraw()
 
 
 func key(ev: InputEventKey) -> void:
+	var pk := int(ev.physical_keycode)
+	var ctl := "wasd" if _wasd else "row"
+	if Keymap.index_of(pk, ctl) >= 0 or Keymap.is_brake(pk, ctl):
+		if ev.pressed and not ev.echo and not Keymap.has_modifier(ev):
+			_held[pk] = true
+		elif not ev.pressed:
+			_held.erase(pk)
+		queue_redraw()
 	menu.key(ev)
+
+
+# フォーカスが外れた時(共通 §3 の 5)。
+func release_all() -> void:
+	_held.clear()
+	queue_redraw()

@@ -16,6 +16,7 @@ const Minimap := preload("res://ui/minimap.gd")
 var menu: Menu
 var _map: Minimap
 var _shown := -1
+var _name: Label
 
 
 func build(store: RefCounted, today: int) -> void:
@@ -48,6 +49,8 @@ func build(store: RefCounted, today: int) -> void:
 	_map = Minimap.new()
 	_map.position = Vector2(900, 200)
 	add_child(_map)
+	_name = Kit.label("", 28, Kit.C_TEXT, 700)
+	add_child(Kit.place(_name, 860, 140, 320, 48))
 	menu = Menu.new(list, 0)
 	_show_map()
 
@@ -57,6 +60,7 @@ func _show_map() -> void:
 	if k == _shown:
 		return
 	_shown = k
+	_name.text = "%d  %s" % [k, S.COURSE_NAMES[k]]  # 地図の上に選んでいるコースの名前(磨きで足した)
 	var c := Courses.load_course(k)
 	if not c.is_empty():
 		_map.setup(c["points"], Vector2(240, 240))
