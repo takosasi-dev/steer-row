@@ -6,6 +6,7 @@ const MainScene := preload("res://ui/main.tscn")
 const Store := preload("res://save/save_store.gd")
 const Keymap := preload("res://ui/keymap.gd")
 const Kit := preload("res://ui/kit.gd")
+const Share := preload("res://core/share_text.gd")
 
 
 static func kev(pk: int, pressed: bool = true, echo: bool = false) -> InputEventKey:
@@ -579,4 +580,108 @@ func test_polish_new_best_and_ahead_of_ghost() -> bool:
 	ok(m2.play._bar["gap"].text.begins_with(S.GHOST_GAP % ["−", ""]), "文字は「幽霊 −…」: %s" % m2.play._bar["gap"].text)
 	eq(m2.play._bar["gap"].get_theme_color("font_color"), Kit.C_GOOD, "前なら緑")
 	_done(m2)
+	return true
+
+
+# --- UI の作り直し(v0.3.0) ---
+
+func test_ui3_theme_on_project() -> bool:
+	eq(ProjectSettings.get_setting("gui/theme/custom"), "res://ui/theme.tres", "Theme は project の設定で付ける(後から作る部品も同じ見た目)")
+	var t := load("res://ui/theme.tres") as Theme
+	ok(t != null, "theme.tres を読める")
+	for type: String in ["Button", "SelButton"]:
+		for st: String in ["normal", "hover", "pressed", "disabled", "focus"] if type == "Button" else ["normal", "hover", "pressed", "disabled"]:
+			ok(t.has_stylebox(st, type), "%s の %s" % [type, st])
+	eq(t.get_type_variation_base("SelButton"), &"Button", "選んでいる印は Button の型の変わり")
+	for type: String in ["TextEdit", "LineEdit", "VScrollBar", "HSlider", "CheckBox", "PopupMenu"]:
+		ok(not t.get_stylebox_list(type).is_empty(), "%s も作ってある" % type)
+	var m := _main()
+	press(m, KEY_X)
+	var b: Button = m.current.menu.buttons[0]
+	eq(b.theme_type_variation, &"SelButton", "選んでいるボタンは SelButton")
+	eq(m.current.menu.buttons[1].theme_type_variation, &"", "ほかは Button")
+	press(m, KEY_DOWN)
+	eq(b.theme_type_variation, &"", "↓ で印が移る")
+	ok(Kit.display(800).fallbacks.size() == 1, "表示用の字体は日本語を Noto Sans JP へ落とす")
+	ok(load(Kit.DISPLAY).has_char("0".unicode_at(0)) and load(Kit.DISPLAY).has_char("−".unicode_at(0)), "表示用の字体に数字と −")
+	_done(m)
+	return true
+
+
+func test_ui3_wipe_keeps_input_and_old_screen() -> bool:
+	var m := _main()
+	press(m, KEY_X)
+	ok(m._leaving != null, "切り替わりの間は古い画面(S0)を帯の向こうに残す")
+	ok(m._leaving.process_mode == Node.PROCESS_MODE_DISABLED, "古い画面は止める")
+	ok(m.wipe_p < 1.0, "帯が流れ始める")
+	press(m, KEY_ENTER)
+	eq(m.screen, "play", "帯が流れている間のキーも新しい画面が受ける(飲まない)")
+	var old_play: Node = m.play
+	var leaving_buttons: Array = m._leaving.find_children("*", "Button", true, false)
+	ok(leaving_buttons.all(func(x: Button) -> bool: return x.mouse_filter == Control.MOUSE_FILTER_IGNORE), "古い画面のボタンはマウスを受けない")
+	_finish(m)
+	m.current._shown_at -= 1000
+	frames(m, 1)
+	ok(old_play.get_parent() != null and not old_play.can_process(), "終わった走りの画面は止めたまま帯の向こうに残る")
+	press(m, KEY_R)
+	var p: Node = m.play
+	eq(m.screen, "play", "R でもう1回")
+	press(m, KEY_R)
+	frames(m, 1)
+	ok(m.play == p, "R の連打で 2 回始まらない")
+	m._wipe_step(1.0)
+	m._drop_leaving()
+	ok(m._leaving == null, "流れ終わったら古い画面を消す")
+	_done(m)
+	return true
+
+
+func test_ui3_reduce_motion() -> bool:
+	var m := _main()
+	m.store.set_setting("reduce_flash", true)
+	m._apply_settings()
+	ok(not m.backdrop.moving, "点滅を弱めると背景の線を止める")
+	press(m, KEY_X)
+	ok(m._leaving == null and m.wipe_p >= 1.0, "点滅を弱めると帯を流さない")
+	ok(m.current.modulate.a < 1.0, "代わりに新しい画面を薄く出す")
+	press(m, KEY_ENTER)
+	_go(m)
+	m.play._on_event({"type": "lap", "lap": 1, "ticks": 1500, "best": false})
+	frames(m, 1)
+	eq(m.play._center.scale, Vector2.ONE, "点滅を弱めると字をはねさせない")
+	_finish(m)
+	ok(m.current.calm and m.current.progress(10000) == 1.0, "結果の数え上げも省く")
+	eq(m.current._time.text, Share.time_text(m.current.total), "タイムは最初から最後の値")
+	_done(m)
+	return true
+
+
+func test_ui3_result_count_and_celebrate() -> bool:
+	var m := _main()
+	_to_play(m)
+	_finish(m)
+	ok(not m.current.celebrate, "初めての走りは祝わない(比べる物が無い)")
+	ok(m.current._time.text == Share.time_text(0), "タイムは 0 から数え上げる")
+	m.current._shown_at -= 1000
+	frames(m, 1)
+	eq(m.current._time.text, Share.time_text(m.current.total), "数え上げの後は合計のタイム")
+	eq(m.current.menu.sel, 0, "もう1回を最初から選んでいる")
+	press(m, KEY_R)
+	_go(m)
+	for k in 30:
+		m.play.sim.set_input(1, false)  # 遅くする
+		m.play.sim.step()
+	_finish(m)
+	ok(not m.current.celebrate, "遅ければ祝わない")
+	var best: int = m.store.course(0)["best_ticks"]
+	m.current._shown_at -= 1000
+	frames(m, 1)
+	press(m, KEY_R)
+	m.play._prev_best = best
+	var res: Dictionary = m.play.sim.result()
+	res["total_ticks"] = best - 120
+	res["finished"] = true
+	m._on_finished(res, m.play.sim.record())
+	ok(m.current.celebrate, "自己ベストを縮めたら祝う(市松の帯と新しい記録の札)")
+	_done(m)
 	return true

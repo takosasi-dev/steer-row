@@ -72,7 +72,7 @@ func test_ac21_no_network() -> bool:
 
 
 func test_sfx_loaded_and_loops() -> bool:
-	eq(Sfx._streams.size(), 9, "効果音 9 個を読める(10 種以内)")
+	eq(Sfx._streams.size(), 10, "効果音 10 個を読める(10 種以内。決めた音は v0.3.0)")
 	var e: Variant = Sfx._streams.get("engine")
 	ok(e is AudioStreamWAV and e.loop_mode == AudioStreamWAV.LOOP_FORWARD, "エンジンの音はループ")
 	var total := 0

@@ -1,4 +1,4 @@
-"""効果音 9 個(仕様書 §9.10)を合成して assets/sfx/<名前>.wav に書く。標準ライブラリだけ。
+"""効果音 10 個(仕様書 §9.10 の 9 個と、v0.3.0 で足したメニューの決めた音)を合成して assets/sfx/<名前>.wav に書く。標準ライブラリだけ。
 雑音は決まった式の擬似乱数で作る(何度回しても同じバイト列)。16bit PCM・モノラル・22050 Hz。合計 400 KB 以下(NFR-7)。
 engine と drift はループで鳴らす(audio/sfx.gd がループに設定する)ので、端がつながる長さにしてある。作りは KeyFlak の tools/gen_sfx.py。
 
@@ -101,6 +101,10 @@ def main():
     b = []
     tone(b, 0, 0.04, 1200, 1400, decay=30)  # メニューの選択
     write("select", b, 0.35)
+    b = []
+    tone(b, 0, 0.05, 900, decay=25)
+    tone(b, 0.035, 0.09, 1350, decay=22)  # メニューで決めた: 短い 2 音(v0.3.0)
+    write("ok", b, 0.35)
     total = sum(p.stat().st_size for p in OUT.glob("*.wav"))
     print(f"{len(list(OUT.glob('*.wav')))} 個、合計 {total:,} バイト")
 

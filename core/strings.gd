@@ -3,7 +3,16 @@
 extends RefCounted
 
 const NAME := "SteerRow"
-const VERSION := "v0.2.0"
+const VERSION := "v0.3.0"
+
+# 操作の案内(画面の下。キーの印は ui/kit.gd の draw_hints が描く。UI の作り直しで足した。v0.3.0)
+const HINT_SELECT := "選ぶ"
+const HINT_CHANGE := "変える"
+const HINT_OK := "決める"
+const HINT_RUN := "走る"
+const LAP_N := "%d 周"  # 結果の周ごとの札
+const KEYS_HELD := "同時に押さえているキーの数"  # キーの確かめの数の見出し
+const KEYS_LAST := "最後に届いたキーの中身"  # キーの確かめの生の情報の見出し
 const URL := "https://takosasi-dev.github.io/steer-row/"
 
 # 10 キーの印字(§9.2。左から 0〜9)

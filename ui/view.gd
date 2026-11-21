@@ -7,6 +7,8 @@ const B := preload("res://core/balance.gd")
 const S := preload("res://core/strings.gd")
 const Kit := preload("res://ui/kit.gd")
 
+const TOP_BAND := 64.0  # 上の帯の高さ(v0.3.0)
+
 var rotate_on := true
 var reduce_flash := false
 var wasd := false
@@ -252,8 +254,20 @@ func _draw_hud() -> void:
 	if snap.is_empty():
 		return
 	var c: Dictionary = snap["car"]
-	_hud.draw_rect(Rect2(-2000, B.HUD_TOP, 5280, 2000), Color(Kit.C_BG, 0.78))
+	# 帯の幕は 88%。舞台の外(縦に長い窓の上下の余り)は塗りつぶして、帯が宙に浮いて見えないようにする(v0.3.0)
+	_hud.draw_rect(Rect2(-2000, B.HUD_TOP, 5280, B.SCREEN_H - B.HUD_TOP), Color(Kit.C_BG, 0.88))
+	_hud.draw_rect(Rect2(-2000, B.SCREEN_H, 5280, 2000), Kit.C_BG)
 	_hud.draw_line(Vector2(-2000, B.HUD_TOP), Vector2(3280, B.HUD_TOP), Color(Kit.C_WALL, 0.25), 1.0)
+	# 上の帯(v0.3.0): 周・タイム・最速の周・幽霊との差の後ろ。下の帯と同じ幕で、どんな道の上でも字が読める
+	_hud.draw_rect(Rect2(-2000, 0, 5280, TOP_BAND), Color(Kit.C_BG, 0.88))
+	_hud.draw_rect(Rect2(-2000, -2000, 5280, 2000), Kit.C_BG)
+	_hud.draw_line(Vector2(-2000, TOP_BAND), Vector2(3280, TOP_BAND), Color(Kit.C_WALL, 0.25), 1.0)
+	_hud.draw_rect(Rect2(440, TOP_BAND - 3, 400, 3), Kit.C_AMBER)  # タイムの下の琥珀の線
+	# 舞台の上下の縁に細い市松の枠(縦に長い窓でだけ見える。道がぶつっと切れて見えないように、わざと作った枠にする)
+	for y: float in [-14.0, B.SCREEN_H + 4.0]:
+		Kit.draw_checker(_hud, Rect2(0, y, B.SCREEN_W, 10), 128, 2, Color(Kit.C_FLAG, 0.55), Kit.C_BG)
+	_hud.draw_line(Vector2(-2000, -1.5), Vector2(3280, -1.5), Color(Kit.C_WALL, 0.5), 2.0)  # 16:9 の窓では見えない所
+	_hud.draw_line(Vector2(-2000, B.SCREEN_H + 1.5), Vector2(3280, B.SCREEN_H + 1.5), Color(Kit.C_WALL, 0.5), 2.0)
 	Kit.draw_strip(_hud, lit, wasd, float(c["wheel"]), float(snap["target"]))
 	Kit.draw_speed(_hud, float(c["speed"]) / B.V_MAX, bool(snap["brake"]))
 

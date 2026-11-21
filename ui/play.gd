@@ -55,27 +55,29 @@ func _ready() -> void:
 	minimap = Minimap.new()
 	minimap.position = Vector2(1080, 16)
 	add_child(minimap)
-	var esc := Kit.place(Kit.button("Esc", S.ESC, 20), 24, 12, 72, 40)
+	var esc := Kit.place(Kit.button("Esc", S.ESC, 18), 24, 12, 72, 40)
 	esc.pressed.connect(func() -> void: pause_requested.emit())
 	add_child(esc)
-	_bar["lap"] = Kit.label("", 26, Kit.C_TEXT, 700)
-	_bar["lap"].horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
-	add_child(Kit.place(_bar["lap"], 124, 8, 200, 48))
-	_bar["time"] = Kit.label("", 40, Kit.C_TEXT, 700)
-	add_child(Kit.place(_bar["time"], 440, 4, 400, 56))
-	_bar["best"] = Kit.label("", 22, Kit.C_DIM, 500)
-	_bar["best"].horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
-	add_child(Kit.place(_bar["best"], 820, 12, 250, 40))
-	_bar["gap"] = Kit.label("", 22, Kit.C_DIM, 700)
-	add_child(Kit.place(_bar["gap"], 440, 56, 400, 30))
-	_center = Kit.label("", 64, Kit.C_TEXT, 800)
-	var band := Kit.box(Color(0, 0, 0, B.CENTER_BAND_ALPHA), Color(Kit.C_WALL, 0.35), 1)
-	band.content_margin_left = 36
-	band.content_margin_right = 36
-	band.set_corner_radius_all(10)
-	_center.add_theme_stylebox_override("normal", band)  # 道や壁の線の上でも字が読めるように
+	# 上の帯(v0.3.0): タイムが一番大きく、周がその次、最速の周と幽霊との差は小さく右に重ねる。字は Saira の斜め
+	_bar["lap"] = Kit.label_left("", 28, Kit.C_TEXT, 800, true)
+	add_child(Kit.place(_bar["lap"], 122, 6, 150, 52))
+	_bar["time"] = Kit.label("", 50, Color.WHITE, 900, true)
+	add_child(Kit.place(_bar["time"], 440, 0, 400, 64))
+	_bar["best"] = Kit.label_left("", 20, Kit.C_TEXT, 700, true)
+	add_child(Kit.place(_bar["best"], 842, 6, 230, 26))
+	_bar["gap"] = Kit.label_left("", 20, Kit.C_DIM, 800, true)
+	add_child(Kit.place(_bar["gap"], 842, 32, 230, 28))
+	_center = Kit.label("", 64, Color.WHITE, 900, true)
+	var band := StyleBoxFlat.new()  # 道や壁の線の上でも字が読めるように、字の幅の傾いた板を敷く
+	band.bg_color = Color(Kit.C_BG, B.CENTER_BAND_ALPHA + 0.15)
+	band.border_color = Kit.C_AMBER
+	band.border_width_left = 8
+	band.skew = Vector2(Kit.SKEW, 0)
+	band.content_margin_left = 44
+	band.content_margin_right = 44
+	_center.add_theme_stylebox_override("normal", band)
 	add_child(Kit.place(_center, 0, 220, 1280, 100))
-	_sub = Kit.label("", 26, Kit.C_GOOD, 700)
+	_sub = Kit.label("", 26, Kit.C_GOOD, 800)
 	add_child(Kit.place(_sub, 0, 326, 1280, 40))
 	_ime = Kit.label(S.IME, 22, Kit.C_WARN, 700)
 	_ime.visible = false
@@ -185,6 +187,15 @@ func _process(delta: float) -> void:
 	cost_us.append(Time.get_ticks_usec() - t0)
 
 
+# 字を k 倍から 1 倍へ戻してはねさせる(v0.3.0)。「点滅を弱める」が入なら動かさない。
+func pop(c: Control, k: float) -> void:
+	if view.reduce_flash or not is_inside_tree():
+		return
+	c.pivot_offset = c.size / 2.0
+	c.scale = Vector2(k, k)
+	create_tween().tween_property(c, "scale", Vector2.ONE, 0.16).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+
+
 # 車の [x, y, hx, hy](無ければ [])。
 static func _pose(c: RefCounted) -> Array:
 	return [] if c == null else [c.x, c.y, c.hx, c.hy]
@@ -266,8 +277,12 @@ func _refresh(delta: float) -> void:
 	_snap = sim.snapshot()
 	var now := Time.get_ticks_msec()
 	var lap: int = _snap["lap"]
-	_bar["lap"].text = S.BAR_LAP % lap
-	_bar["lap"].add_theme_color_override("font_color", Kit.C_TEXT if lap == B.LAPS else Kit.C_DIM)
+	var lap_text: String = S.BAR_LAP % lap
+	if _bar["lap"].text != lap_text:
+		if _bar["lap"].text != "":
+			pop(_bar["lap"], 1.3)  # 周が進んだ
+		_bar["lap"].text = lap_text
+	_bar["lap"].add_theme_color_override("font_color", Color.WHITE if lap == B.LAPS else Kit.C_TEXT)
 	_bar["time"].text = Share.time_text(int(_snap["race_tick"]))
 	_bar["best"].text = S.BAR_BEST_LAP % Share.time_text(int(_snap["best_lap"])) if int(_snap["best_lap"]) >= 0 else ""
 	var text := ""
@@ -281,10 +296,12 @@ func _refresh(delta: float) -> void:
 		text = _lap_note
 	if _center.text != text:
 		_center.text = text
-		_center.add_theme_font_size_override("font_size", 44 if text == _lap_note else 64)
+		_center.add_theme_font_size_override("font_size", 40 if text == _lap_note else (84 if text.length() == 1 else 60))
 		_center.visible = text != ""
 		_center.reset_size()  # 幕を字の幅に合わせて真ん中に置く
 		_center.position.x = (B.SCREEN_W - _center.size.x) / 2.0
+		if text != "":
+			pop(_center, 1.18)  # 数え・スタート・周・ゴールの字がはねて出る
 	_sub.visible = _over_at >= 0
 	var gap: Variant = ghost_gap()
 	_bar["gap"].text = "" if gap == null else S.GHOST_GAP % ["+" if gap > 0 else ("−" if gap < 0 else ""), Share.diff_text(Share.hundredths(absi(gap)))]

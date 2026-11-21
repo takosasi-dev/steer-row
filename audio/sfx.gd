@@ -3,7 +3,7 @@
 # 読めないファイルは音なしで続ける。作りは KeyFlak の audio/sfx.gd。
 extends Node
 
-const NAMES: Array = ["engine", "drift", "go", "wall", "lap", "goal", "best", "timeout", "select"]
+const NAMES: Array = ["engine", "drift", "go", "wall", "lap", "goal", "best", "timeout", "select", "ok"]  # ok は決めた音(v0.3.0)
 const LOOPS: Array = ["engine", "drift"]
 const VOICES := 12
 

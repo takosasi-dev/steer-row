@@ -228,3 +228,42 @@ export async function open(url, metrics = DESKTOP) {
 	};
 	return page;
 }
+
+// 中心 bot の押し方(state.play.hint)を、本物のキーで押さえ続ける・離す。opts.slow を超える速さなら Space を足す。
+// onState(state) で場面を撮る。終わり(over)か screen が play でなくなるまで回し、最後の状態を返す
+export async function driveWith(page, opts = {}) {
+	// jolt: 何 ms おきに ; を JOLT_MS だけ押し込むか(0 なら押さない)。壁と滑りを通る記録を作る(R-4 を割り算と滑りの分岐でも照らす)
+	const { onState = async () => {}, slow = 0, keyOf = (i) => 'asdfghjkl;'[i], brakeKey = ' ', until = () => false, timeoutMs = 120000, jolt = 0 } = opts;
+	const JOLT_MS = 450;
+	const t0 = Date.now();
+	let heldKey = null;
+	let heldBrake = false;
+	const end = Date.now() + timeoutMs;
+	let s = await page.state();
+	const samples = [];
+	while (Date.now() < end) {
+		s = await page.state();
+		if (s.screen !== 'play' || !s.play || s.play.phase === 2 || until(s)) break;
+		if (s.paused) { await sleep(30); continue; }
+		const p = s.play;
+		samples.push({ t: Date.now(), cam: p.cam_r, head: Math.atan2(p.car.hy, p.car.hx), speed: p.car.speed });
+		if ((await onState(s)) === 'reset') { heldKey = null; heldBrake = false; continue; } // フォーカスが外れて離したことになった
+		const i = Math.round(Math.log2(p.hint[0]));
+		const jolting = jolt > 0 && p.race_tick > 240 && (Date.now() - t0) % jolt < JOLT_MS;
+		const want = jolting ? ';' : keyOf(i);
+		const brake = p.hint[1] || (slow > 0 && p.car.speed > slow);
+		if (want !== heldKey) {
+			if (heldKey) await page.up(heldKey);
+			if (want) await page.down(want);
+			heldKey = want;
+		}
+		if (brake !== heldBrake) {
+			await (brake ? page.down(brakeKey) : page.up(brakeKey));
+			heldBrake = brake;
+		}
+		await sleep(8);
+	}
+	if (heldKey) await page.up(heldKey);
+	if (heldBrake) await page.up(brakeKey);
+	return { s, samples };
+}

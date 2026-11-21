@@ -4,13 +4,15 @@
 
 **▶ 遊ぶ: https://takosasi-dev.github.io/steer-row/** (デスクトップの Chrome・Edge・Firefox。キーボードで遊びます。インストール不要)
 
-![幽霊(線の三角)と並んで走るところ。タイムの下に幽霊との差、下に 10 キーの帯と速さの棒とハンドルの針](docs/play.png)
+![タイトル。斜めの題字と縁石の帯、左に入口、右に今日のコースの札](docs/title.png)
 
-![壁に当たって火花が出たところ](docs/wall.png)
+![カーブを走るところ。上の帯にタイム・周・幽霊との差、右上の地図に幽霊の点、下に 10 キーの帯と速さの棒とハンドルの針](docs/play.png)
 
-![結果の画面](docs/result.png)
+![自己ベストを縮めた結果の画面。市松の帯と「新しい記録」の札、周ごとの札](docs/result.png)
 
-> v0.2.0。人に遊んでもらう確かめはまだです。ハンドルの回る速さ・車の速さ・滑り方は仕様の初期値のままで、人が走って決めた値ではありません。コース 1〜15 は試作で、遊んでから選び直します。
+見た目は「夜のサーキットの計器」です。暗い舗装の地に、選んでいる物は計器の琥珀、自分の車とキーは青、題字とタイムは斜めの Saira、ボタンは傾いた板、画面の切り替わりは市松の帯が横に流れます。
+
+> v0.3.0。人に遊んでもらう確かめはまだです。ハンドルの回る速さ・車の速さ・滑り方は仕様の初期値のままで、人が走って決めた値ではありません。コース 1〜15 は試作で、遊んでから選び直します。
 
 ## 遊び方
 
@@ -70,6 +72,10 @@ python tools/gd.py smoke-pck      # 書き出した index.pck を本体にして
 # ブラウザでの確かめ(Node.js と Chrome。窓なし・消音・使い捨てのプロフィールで開き、画面を build/web_shots/ に撮る)
 node tests/web/check.mjs
 SR_URL=https://takosasi-dev.github.io/steer-row/ node tests/web/check.mjs   # 公開した物を確かめる
+node tests/web/shots.mjs     # 全部の画面を 5 つの大きさで撮る(build/web_shots/after/)
+
+# 画面の見た目の決まり(ui/theme.tres)を作り直す
+python tools/gd.py run res://tools/make_theme.gd
 
 # 字体を画面の文字に絞る・効果音を作る(Python)
 pip install fonttools
@@ -81,7 +87,8 @@ python tools/gen_sfx.py
 
 ## 開発状況
 
-- v0.2.0。テストはヘッドレスの Godot で通っています。テスト用の bot(中心線の少し先へ向かう)が 16 本とも 3 周を壁 0 回で走り切ります。
+- v0.3.0(画面の作り直し)。全部の画面を窓なしの Chrome で 1280×720・1920×1080・1024×768・2560×1080 に撮って崩れが無いことを見ています(`tests/web/shots.mjs`)。GPU のある本物の画面での動きの滑らかさは未確認です。
+- テストはヘッドレスの Godot で通っています。テスト用の bot(中心線の少し先へ向かう)が 16 本とも 3 周を壁 0 回で走り切ります。
 - 窓なしの Chrome(デスクトップ版の Chrome をヘッドレスで)で、起動から S0 → タイトル → 設定 → キーの確かめ → 入門コース 2 回(本物のキーの押す・離すで走る)→ 一時停止・タブが裏に回った時の一時停止 → 結果 → コピー → コースを選ぶ → W A S D・回転なしで壁に当てる、までを通しています(`tests/web/check.mjs`。キーボードだけで S1 → S6 → S2 も通ります)。保存が `steer-row/save` に入り、開き直しても残り、同じサイトのほかのゲームの保存を消さないこと、読み込みの後 3 分の通信が 0 件なことも見ています。
 - R-4(幽霊の再生が Web と headless でずれないか)は判定済みで、当たりませんでした: ブラウザで本物のキーで走った記録(壁 16 回・滑りあり)を、ヘッドレスの Godot で再生した最後の位置と、ブラウザの 2 回目に出た幽霊の最後の位置が、どちらも小数 6 桁まで一致しました(差 0 px)。
 - まだ確かめていないこと: Edge・Firefox、本物のキーボードでの同時押さえ(隣り合う 2 キーと Space)、音を耳で聞くこと、画面の回転で酔わないか、人に遊んでもらうこと。
@@ -89,4 +96,4 @@ python tools/gen_sfx.py
 
 ## ライセンス
 
-MIT(`LICENSE`)。同梱の字体は SIL Open Font License 1.1 です(`THIRD-PARTY-NOTICES.md`)。
+MIT(`LICENSE`)。同梱の字体 2 つ(本文の Noto Sans JP、題字と数字の Saira Italic)は SIL Open Font License 1.1 です(`THIRD-PARTY-NOTICES.md`、原文は `assets/fonts/OFL_*.txt`)。

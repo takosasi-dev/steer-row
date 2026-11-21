@@ -16,8 +16,24 @@ const CourseList := preload("res://ui/course_list.gd")
 const Result := preload("res://ui/result.gd")
 const Settings := preload("res://ui/settings.gd")
 const Pause := preload("res://ui/pause.gd")
+const Backdrop := preload("res://ui/backdrop.gd")
+const Gate := preload("res://ui/gate.gd")
+
+# 画面の切り替わり(v0.3.0)。新しい画面はすぐに動かし(入力を飲まない)、古い画面の写しを右へ流れる帯の向こうに残して消す。
+const WIPE_MS := 300  # ふつうの切り替わり
+const WIPE_FAST_MS := 170  # 結果・一時停止からもう1回(遊びに入るまでを遅くしない)
+const FADE_MS := 150  # 「点滅を弱める」が入の時は帯を流さず、新しい画面を薄く出すだけ
+const WIPE_BODY := 260.0  # 帯の幅
+const WIPE_SKEW := 0.15
 
 var stage: Control
+var backdrop: Backdrop
+var wipe: Control  # 流れる帯(舞台の一番上)
+var wipe_p := 1.0  # 帯の進み(0〜1。1 で終わり)
+var _leaving: Control = null  # 古い画面の写しの入れ物(帯より右だけを見せる)
+var _leaving_inner: Control = null
+var _wipe_tween: Tween = null
+var _bg: ColorRect
 var store: Store
 var screen := "gate"  # gate / title / pick / play / result / settings
 var current: Control = null  # 今の画面(play の時は play)
@@ -51,9 +67,15 @@ func _ready() -> void:
 	stage = Control.new()
 	stage.size = Vector2(1280, 720)
 	add_child(stage)
-	var bg := ColorRect.new()
-	bg.color = Kit.C_BG
-	stage.add_child(Kit.place(bg, -2000, -2000, 5280, 4720))
+	_bg = ColorRect.new()
+	_bg.color = Kit.C_BG
+	stage.add_child(Kit.place(_bg, -2000, -2000, 5280, 4720))
+	backdrop = Backdrop.new()
+	stage.add_child(backdrop)
+	wipe = Control.new()
+	wipe.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	wipe.draw.connect(_draw_wipe)
+	stage.add_child(wipe)
 	get_viewport().size_changed.connect(_layout)
 	_layout()
 	store = Store.new()
@@ -74,19 +96,111 @@ func _layout() -> void:
 
 func _apply_settings() -> void:
 	Sfx.set_volume(int(store.settings()["volume"]))
+	backdrop.moving = not store.settings()["reduce_flash"]
 
 
+# 今の画面を片付ける。画面は消さずに、帯の向こうに残す入れ物へ移す(動きを止め、マウスも受けない)。消すのは帯が流れ終わった時。
+# 「点滅を弱める」が入なら、すぐ消す。
 func _clear() -> void:
-	if pause_view != null:
-		pause_view.queue_free()
-		pause_view = null
-	for c in stage.get_children():
-		if c is ColorRect and c.get_index() == 0:
-			continue
-		c.queue_free()
+	pause_view = null
+	_drop_leaving()
+	var olds: Array = stage.get_children().filter(func(c: Node) -> bool: return c != _bg and c != backdrop and c != wipe)
+	if not olds.is_empty() and not store.settings()["reduce_flash"]:
+		_leaving = Control.new()
+		_leaving.clip_contents = true
+		_leaving.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		_leaving.process_mode = Node.PROCESS_MODE_DISABLED
+		_leaving.position = Vector2(-2000, -2000)
+		_leaving.size = Vector2(6000, 6000)
+		_leaving_inner = Control.new()
+		_leaving_inner.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		_leaving_inner.position = Vector2(2000, 2000)
+		_leaving.add_child(_leaving_inner)
+		var under := ColorRect.new()  # 古い画面の下を塞ぐ(新しい画面が透けて見えないように)
+		under.color = Kit.C_BG
+		under.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		_leaving_inner.add_child(Kit.place(under, -2000, -2000, 5280, 4720))
+		stage.add_child(_leaving)
+		for c: Node in olds:
+			c.reparent(_leaving_inner, false)
+			for k: Node in [c] + c.find_children("*", "Control", true, false):
+				if k is Control:
+					(k as Control).mouse_filter = Control.MOUSE_FILTER_IGNORE
+	else:
+		for c: Node in olds:
+			c.queue_free()
 	current = null
 	play = null
 	Sfx.stop_loops()
+
+
+func _drop_leaving() -> void:
+	if _leaving != null:
+		_leaving.queue_free()
+		_leaving = null
+		_leaving_inner = null
+
+
+# 新しい画面を置いた後に呼ぶ。帯を左から右へ流し、帯より左に新しい画面、右に古い画面を見せる。入力は新しい画面がすぐに受ける。
+func _enter(ms: int = WIPE_MS) -> void:
+	backdrop.visible = screen != "play"
+	if _wipe_tween != null:
+		_wipe_tween.kill()
+	if store.settings()["reduce_flash"] or _leaving == null:
+		_drop_leaving()
+		wipe_p = 1.0
+		wipe.queue_redraw()
+		if current != null and screen != "gate":
+			current.modulate.a = 0.0
+			_wipe_tween = create_tween()
+			_wipe_tween.tween_property(current, "modulate:a", 1.0, FADE_MS / 1000.0)
+		return
+	stage.move_child(_leaving, -1)
+	stage.move_child(wipe, -1)
+	_wipe_step(0.0)
+	_wipe_tween = create_tween()
+	_wipe_tween.tween_method(_wipe_step, 0.0, 1.0, ms / 1000.0).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_IN_OUT)
+	_wipe_tween.tween_callback(_drop_leaving)
+
+
+# 帯の前の端の x(舞台の座標)。帯の幅と傾きのぶん、画面の外から外まで動かす。
+func wipe_edge(p: float) -> float:
+	var left := -stage.position.x - 300.0
+	var right := get_viewport().get_visible_rect().size.x - stage.position.x + WIPE_BODY + 300.0
+	return lerpf(left, right, p)
+
+
+func _wipe_step(p: float) -> void:
+	wipe_p = p
+	if _leaving != null:
+		var cut := wipe_edge(p) - WIPE_BODY / 2.0  # 帯の真ん中で切る(傾いた縁は帯が隠す)
+		_leaving.position.x = cut
+		_leaving.size.x = 9000.0
+		_leaving_inner.position.x = -cut
+	wipe.queue_redraw()
+
+
+# 帯: 暗い板、後ろの縁に市松の列、前の縁に琥珀の線(横に流れる。題材の「市松・速さ」)。
+func _draw_wipe() -> void:
+	if wipe_p >= 1.0:
+		return
+	var x := wipe_edge(wipe_p)
+	var top := -stage.position.y - 40.0
+	var bottom := get_viewport().get_visible_rect().size.y - stage.position.y + 40.0
+	var h := bottom - top
+	var d := h * WIPE_SKEW / 2.0
+	var body := PackedVector2Array([Vector2(x - WIPE_BODY + d, top), Vector2(x + d, top), Vector2(x - d, bottom), Vector2(x - WIPE_BODY - d, bottom)])
+	wipe.draw_colored_polygon(body, Kit.C_PANEL)
+	wipe.draw_colored_polygon(PackedVector2Array([Vector2(x - 10 + d, top), Vector2(x + d, top), Vector2(x - d, bottom), Vector2(x - 10 - d, bottom)]), Kit.C_AMBER)
+	var cell := 22.0
+	var rows := int(h / cell) + 1
+	for r in rows:
+		var y := top + r * cell
+		var off := d - (y - top) * WIPE_SKEW
+		for c in 2:
+			if (r + c) % 2 == 0:
+				var x0 := x - WIPE_BODY + off + c * cell
+				wipe.draw_rect(Rect2(x0, y, cell, cell), Kit.C_FLAG)
 
 
 # --- S0 始める ---
@@ -94,16 +208,12 @@ func _clear() -> void:
 func _show_gate() -> void:
 	_clear()
 	screen = "gate"
-	var g := Control.new()
-	g.size = Vector2(1280, 720)
-	g.add_child(Kit.place(Kit.label(S.NAME, 72, Kit.C_TEXT, 800), 0, 220, 1280, 100))
-	g.add_child(Kit.place(Kit.label(S.S0_START, 28, Kit.C_TEXT, 500), 0, 360, 1280, 44))
-	g.add_child(Kit.place(Kit.label(S.S0_KEYBOARD, 18, Kit.C_DIM), 0, 410, 1280, 30))
-	_touch_note = Kit.label(S.TOUCH, 22, Kit.C_WARN, 700)
-	_touch_note.visible = false
-	g.add_child(Kit.place(_touch_note, 0, 470, 1280, 40))
+	var g := Gate.new()
+	g.build(not store.settings()["reduce_flash"])
+	_touch_note = g.touch_note
 	stage.add_child(g)
 	current = g
+	_enter()
 
 
 func _input(event: InputEvent) -> void:
@@ -155,6 +265,7 @@ func _show_title() -> void:
 	t.chosen.connect(_on_title)
 	stage.add_child(t)
 	current = t
+	_enter()
 
 
 func _on_title(what: String) -> void:
@@ -181,11 +292,13 @@ func _show_pick() -> void:
 	v.back.connect(_show_title)
 	stage.add_child(v)
 	current = v
+	_enter()
 
 
 # --- S2 プレイ ---
 
 func _start(r: Dictionary) -> void:
+	var fast := screen in ["result", "play"]  # もう1回・やり直す(遊びに入るまでを遅くしない)
 	_clear()
 	run = r
 	screen = "play"
@@ -205,6 +318,7 @@ func _start(r: Dictionary) -> void:
 	play.finished.connect(_on_finished)
 	play.pause_requested.connect(_pause)
 	current = play
+	_enter(WIPE_FAST_MS if fast else WIPE_MS)
 
 
 func _pause() -> void:
@@ -215,6 +329,7 @@ func _pause() -> void:
 	pause_view.build()
 	pause_view.picked.connect(_on_pause)
 	stage.add_child(pause_view)
+	_fade_in(pause_view)
 
 
 func _on_pause(what: String) -> void:
@@ -281,11 +396,12 @@ func _on_finished(result: Dictionary, record: String) -> void:
 	var label: String = S.SHARE_INTRO if k == B.INTRO else "%s  %s" % [S.COURSE_N % k, S.COURSE_NAMES[k]]
 	if r["entry"] == Share.DAILY:
 		label = S.B_DAILY + "   " + label
-	v.build(result, rec, text, label)
+	v.build(result, rec, text, label, store.settings()["reduce_flash"])
 	v.retry.connect(func() -> void: _start(run))  # FR-17: 同じコース
 	v.to_title.connect(_show_title)
 	stage.add_child(v)
 	current = v
+	_enter()
 	if auto:
 		_auto_results += 1
 		print("SMOKE result %d: %s" % [_auto_results, JSON.stringify(result)])
@@ -310,11 +426,19 @@ func _show_settings(from: String) -> void:
 		current = s
 		screen = "settings"
 		pause_view.process_mode = Node.PROCESS_MODE_DISABLED
+		_fade_in(s)
 	else:
 		_clear()
 		screen = "settings"
 		stage.add_child(s)
 		current = s
+		_enter()
+
+
+# 重ねる画面(一時停止・一時停止から開いた設定)は帯を流さず、薄く出す(下の遊びの画面が隠れたままにならないように短く)。
+func _fade_in(c: Control) -> void:
+	c.modulate.a = 0.0
+	create_tween().tween_property(c, "modulate:a", 1.0, FADE_MS / 1000.0)
 
 
 func _settings_back(s: Control) -> void:
